@@ -1,0 +1,296 @@
+---
+title: "Air qPCR Helper"
+format: dashboard
+server: shiny
+---
+
+# Prepare LabKey Upload
+
+```{python}
+# | context: setup
+import asyncio
+import polars as pl
+from shiny import App, render, ui, reactive
+
+
+def process_lc480(plate_results: pl.LazyFrame, input) -> pl.LazyFrame:
+    return (
+        plate_results
+        # Add new columns and values for experiment, pcr_lab, pcr_date, comments
+        .with_columns(
+            experiment=input.experiment(),
+            pcr_lab=input.lab(),
+            pcr_date=input.date(),
+            cq_conf=input.cq_conf(),
+            amp_score=input.amp_score(),
+            comments=input.comments(),
+            pcr_assay=input.assay(),
+        )
+        # Change column names for Sample, Target, Cq, Cq.Conf, and Amp.Score
+        # to match labkey input columns
+        .rename(
+            {
+                "Name": "cartridge_id",
+                "Cp": "pcr_ct",
+                "Concentration": "pcr_copies",
+            }
+        )
+        # Replace pcr_ct values with values accepted by labkey
+        .with_columns(
+            pl.when(pl.col("pcr_copies").is_null())
+            .then(pl.lit(99))
+            .otherwise(pl.col("pcr_copies"))
+            .alias("pcr_ct")
+        )
+        # add dilution factor
+        .with_columns(
+            pl.when(pl.col("cartridge_id").str.contains("AE"))
+            .then(pl.lit(input.dilution()))
+            .otherwise(pl.null)
+        )
+        # reorder columns required for labkey
+        .select(
+            "experiment",
+            "cartridge_id",
+            "pcr_lab",
+            "pcr_date",
+            "pcr_assay",
+            "pcr_ct",
+            "pcr_copies",
+            "dilution_factor",
+            "cq_conf",
+            "amp_score",
+            "comments",
+        )
+    )
+
+
+def process_lc96(plate_results: pl.LazyFrame, input) -> pl.LazyFrame:
+    return (
+        plate_results
+        # Add new columns and values for experiment, pcr_lab, pcr_date, comments
+        .with_columns(
+            experiment=input.experiment(),
+            pcr_lab=input.pcr_lab(),
+            pcr_date=input.date(),
+            cq_conf=input.cq_conf(),
+            amp_score=input.amp_score(),
+            comments=input.comments(),
+        )
+        # Change column names for Sample, Target, Cq, Cq.Conf, and Amp.Score to
+        # match labkey input columns
+        .rename(
+            {
+                "Sample.Name": "cartridge_id",
+                "Gene.Name": "pcr_assay",
+                "Cq": "pcr_ct",
+                "Concentration.Mean": "pcr_copies",
+            }
+        )
+        # Replace pcr_ct, pcr_copies, and pcr_assays with values accepted by labkey
+        .with_columns(
+            pcr_ct=pl.col("pcr_ct").str.replace("-", "99").str.to_integer(),
+            pcr_copies=pl.col("pcr_ct").str.replace("-", ""),
+            pcr_assay=(
+                pl.when(pl.col("pcr_assay").is_in(["N1", "N2"])).then(
+                    pl.concat_str([pl.lit("CDC "), pl.col("pcr_assay")]).otherwise(
+                        pl.col("pcr_assay")
+                    )
+                )
+            ),
+        )
+        .select(
+            "experiment",
+            "cartridge_id",
+            "pcr_lab",
+            "pcr_date",
+            "pcr_assay",
+            "pcr_ct",
+            "pcr_copies",
+            "cq_conf",
+            "amp_score",
+            "comments",
+        )
+    )
+```
+
+## Row
+
+### {.sidebar width="300px"}
+
+```{python}
+# | context: ui
+# app_ui = ui.page_fluid(
+
+# Input: Select a file
+ui.input_file(
+    "file1",
+    "Choose a file to upload:",
+    multiple=False,
+    accept=["text/csv", "text/comma-separated-values,text/plain", ".csv"],
+)
+
+# Input: Checkbox if file has header
+ui.input_checkbox("header", "Header", True)
+
+# Input: Select separator
+ui.input_radio_buttons(
+    "sep",
+    "Separator",
+    choices={"Comma": ",", "Semicolon": ";", "Tab": "\t"},
+    selected="Tab",
+    width="300px",
+)
+
+# Input: Define rows to skip, if any
+ui.input_numeric(
+    id="skip",
+    label="Rows at the top to skip:",
+    value=0,
+    min=0,
+)
+
+# Input: Select quotes
+ui.input_radio_buttons(
+    "quote",
+    "Quote",
+    {"Double Quote": '"', "Single Quote": "'"},
+    selected="Double Quote",
+)
+
+# Horizontal line
+ui.hr()
+
+# Input: Choose an instrument
+ui.input_select(
+    id="instrument",
+    label="Choose an instrument:",
+    choices=["", "LC480", "LC96"],
+    selected="",
+)
+
+# Input: the current experiment number
+ui.input_numeric(
+    id="experiment",
+    label="Experiment Number:",
+    value=None,
+    min=1,
+)
+
+# Input: the current date
+ui.input_date(
+    id="date",
+    label="qPCR Run Date:",
+)
+
+# Input: Choose a pathogen
+ui.input_select(
+    id="pathogen",
+    label="Choose a pathogen:",
+    choices=["", "IAV", "SC2"],
+    selected="",
+)
+
+# Input: Choose the lab
+ui.input_text(id="lab", label="PCR Lab:", value="AVRL")
+
+# Input: Choose the cq_conf
+ui.input_numeric(
+    id="cq_conf",
+    label="Cq configuration:",
+    value=None,
+    min=0,
+)
+
+# Input: Choose the amp_score
+ui.input_numeric(
+    id="amp_score",
+    label="Amplification score:",
+    value=None,
+    min=0,
+)
+
+# Input: Add comments
+ui.input_text(
+    id="comments",
+    label="Additional comments:",
+    value=None,
+)
+
+# Input: the name of the assay
+ui.input_select(
+    id="assay",
+    label="Name of the assay run:",
+    choices=[
+        "",
+        "IAV M gene",
+        "IAV M gene AVRL-20240316-multiplex",
+        "CDC N1",
+        "CDC N2",
+        "CDC N1 AVRL-20240316-multiplex",
+    ],
+    selected="",
+)
+
+# Input: the dilution factor
+ui.input_numeric(
+    id="dilution",
+    label="Dilution factor",
+    value=None,
+    min=0,
+)
+
+# Horizontal line
+ui.hr()
+
+# )
+```
+
+### Preview
+```{python}
+# | context: ui
+
+
+@render.table
+def preview_table():
+    return construct_table().collect().to_pandas()
+```
+
+#### {.toolbar}
+```{python}
+# | context: ui
+ui.download_button("download", "Download Dataset")
+```
+
+
+```{python}
+# | context: default
+@reactive.calc
+def construct_table() -> pl.LazyFrame:
+    file = input.file1()
+    if not file:
+        return
+
+    plate_results = pl.scan_csv(
+        file,
+        header=input.header(),
+        sep=input.sep(),
+        quote=input.quote(),
+        skip=input.skip(),
+    )
+
+    return (
+        process_lc480(plate_results, input)
+        if input.instrument() == "LC480"
+        else process_lc96(plate_results, input)
+    )
+
+
+@render.download(
+    filename=lambda: f"{input.experiment()}_labkey_{input.pathogen()}_results.csv"
+)
+def download():
+    table = construct_table()
+    pl.sink_csv(table)
+    yield
+```

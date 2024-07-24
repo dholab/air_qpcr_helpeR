@@ -1,0 +1,6 @@
+/.quarto/
+/_freeze/
+/.venv/
+
+.DS_Store
+._*
