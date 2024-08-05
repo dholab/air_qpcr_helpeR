@@ -209,22 +209,26 @@ processLC96 <- function(plate_results, input) {
         rename(
             cartridge_id = Sample.Name,
             pcr_assay = Gene.Name,
-            pcr_ct = Cq,
+            pcr_ct = Cq.Mean,
             pcr_copies = Concentration.Mean,
         ) |>
         # Replace pcr_ct, pcr_copies, and pcr_assays with values accepted by labkey
         mutate(
             pcr_ct = str_replace(pcr_ct, "-", "99") |> as.numeric(),
-            pcr_copies = str_remove(pcr_ct, "-"),
+            pcr_copies = str_remove(pcr_copies, "-"),
             pcr_assay = if_else(
                 pcr_assay %in% c("N1", "N2"),
                 paste("CDC", pcr_assay, sep = " "),
                 pcr_assay
             )
         ) |>
+        # add dilution factor
+        mutate(
+            dilution_factor = if_else(grepl("AE", cartridge_id), input$dilution, NA)
+        ) |>
         select(
             experiment, cartridge_id, pcr_lab, pcr_date, pcr_assay, pcr_ct,
-            pcr_copies, cq_conf, amp_score, comments
+            pcr_copies, dilution_factor, cq_conf, amp_score, comments
         )
 
     return(labkey_format)
@@ -277,7 +281,7 @@ server <- function(input, output) {
         content = function(file) {
 
             # Write the dataset to the `file` that will be downloaded
-            write_csv(datasetInput(), file)
+            write_csv(datasetInput(), file, na = "")
         }
     )
 }
