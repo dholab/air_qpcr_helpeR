@@ -131,7 +131,9 @@ ui <- page_sidebar(
                 "IAV M gene AVRL-20240316-multiplex",
                 "CDC N1",
                 "CDC N2",
-                "CDC N1 AVRL-20240316-multiplex"
+                "CDC N1 AVRL-20240316-multiplex",
+                "CDC N1 AVRL-20240710-multiplex",
+                "IAV M gene-20240710-multiplex"
             ),
             selected = "",
         ),
