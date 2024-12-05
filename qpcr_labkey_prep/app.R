@@ -88,7 +88,7 @@ ui <- page_sidebar(
         selectInput(
             inputId = "pathogen",
             label = "Choose a pathogen:",
-            choices = c("", "IAV", "SC2"),
+            choices = c("", "IAV", "SC2", "IAV-H5"),
             selected = "",
         ),
 
@@ -129,6 +129,7 @@ ui <- page_sidebar(
                 "",
                 "IAV M gene",
                 "IAV M gene AVRL-20240316-multiplex",
+                "DHO CN H5specific 01",
                 "CDC N1",
                 "CDC N2",
                 "CDC N1 AVRL-20240316-multiplex",
